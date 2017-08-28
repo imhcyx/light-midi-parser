@@ -47,7 +47,7 @@ static int midi_getc(midi_t *midi) {
 	}
 	else {
 		if (midi->pos >= midi->size) return -1;
-		return *(midi->mem + midi->pos++);
+		return *(midi->mem + midi->pos++) & 0xff;
 	}
 }
 
