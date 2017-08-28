@@ -87,6 +87,13 @@ midi_hdr_t* midi_get_header(midi_t *midi);
 midi_trk_t* midi_get_track(midi_t *midi, int ntrk);
 
 /*
+* Combine all tracks into one
+* This is useful for MIDI sequencers
+* After this, midi_get_track returns the combined track
+*/
+void midi_combine_track(midi_t *midi);
+
+/*
 * Close an opened MIDI file
 */
 void midi_close(midi_t *midi);

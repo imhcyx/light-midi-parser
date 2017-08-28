@@ -9,7 +9,8 @@ typedef struct midi_s {
 	size_t size; /* Valid if loaded from memory */
 	long pos; /* Valid if loaded from memory */
 	midi_hdr_t hdr;
-	midi_trk_t trks[MAX_NUM_OF_TRKS];
+	midi_trk_t trks[MAX_NUM_OF_TRKS]; /* If combined, the result is stored in trk[0] */
+	int combined; /* Indicates whether all tracks are combined into one */
 } midi_t;
 
 const char MTHD_MAGIC[] = {'M','T','h','d'};
@@ -29,6 +30,9 @@ static long midi_tell(midi_t *midi);
 static int midi_readvarlen(midi_t *midi);
 static int midi_parse_hdr(midi_t *midi);
 static int midi_parse_trk(midi_t *midi, int trkno);
+static void translate_abstime(midi_trk_t *trk);
+static void translate_deltatime(midi_trk_t *trk);
+static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2);
 
 static int midi_eof(midi_t *midi) {
 	if (midi->stream) {
@@ -263,6 +267,85 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 	return 0;
 }
 
+/* Translate a track into absolute time */
+static void translate_abstime(midi_trk_t *trk) {
+	int time = 0;
+	midi_evt_node_t *node;
+	node = trk->first;
+	while (node) {
+		time += node->deltatime;
+		node->deltatime = time;
+		node = node->next;
+	}
+}
+
+/* Translate a track into delta time */
+static void translate_deltatime(midi_trk_t *trk) {
+	int prevtime = 0, tmp;
+	midi_evt_node_t *node;
+	node = trk->first;
+	while (node) {
+		tmp = node->deltatime - prevtime;
+		prevtime = node->deltatime;
+		node->deltatime = tmp;
+		node = node->next;
+	}
+}
+
+/* Combine trk2 into trk1 */
+/* Both tracks have to be in absolute time */
+static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2) {
+	midi_evt_node_t *cur, *node1, *node2, *tmp;
+	node1 = trk1->first;
+	node2 = trk2->first;
+	trk2->first = NULL;
+	/* Two trivial cases */
+	if (!node1) {
+		trk1->first = node2;
+		return;
+	}
+	if (!node2) return;
+	/* Process the first(root) node */
+	if (node1->deltatime > node2->deltatime) {
+		trk1->first = node2;
+		node2 = node2->next;
+	}
+	else {
+		node1 = node1->next;
+	}
+	cur = trk1->first;
+	/* Process the following */
+	while (node1 || node2) {
+		if (!node1) {
+			cur->next = node2;
+			break;
+		}
+		if (!node2) {
+			cur->next = node1;
+			break;
+		}
+		if (node1->deltatime > node2->deltatime) {
+			cur->next = node2;
+			node2 = node2->next;
+		}
+		else {
+			cur->next = node1;
+			node1 = node1->next;
+		}
+		cur = cur->next;
+	}
+	/* Remove redundant eot messages */
+	cur = trk1->first;
+	while (cur) {
+		tmp = cur->next;
+		if (tmp && tmp->evt == meta_evt && tmp->meta == eot && tmp->next) {
+			cur->next = tmp->next;
+			free((void*)tmp);
+		}
+		cur = cur->next;
+	}
+}
+
 midi_t* midi_open_file(char *path) {
 	midi_t *midi;
 	FILE *stream;
@@ -302,6 +385,7 @@ int midi_is_midi_format(midi_t *midi) {
 int midi_parse(midi_t *midi) {
 	int trkno = 0;
 	char buf[4];
+	midi_seek(midi, 0, SEEK_SET);
 	while (!midi_eof(midi)) {
 		if (midi_getnc(midi, buf, 4) != 4) {
 			if (midi_eof(midi)) return 0;
@@ -328,6 +412,15 @@ midi_hdr_t* midi_get_header(midi_t *midi) {
 
 midi_trk_t* midi_get_track(midi_t *midi, int ntrk) {
 	return &midi->trks[ntrk];
+}
+
+void midi_combine_track(midi_t *midi) {
+	int i;
+	for (i = 0; i < midi->hdr.ntrks; i++) translate_abstime(&midi->trks[i]);
+	for (i = 1; i < midi->hdr.ntrks; i++) {
+		combine_trk_abstime(&midi->trks[0], &midi->trks[i]);
+	}
+	translate_deltatime(&midi->trks[0]);
 }
 
 void midi_close(midi_t *midi) {
