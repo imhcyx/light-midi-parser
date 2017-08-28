@@ -10,7 +10,6 @@ typedef struct midi_s {
 	long pos; /* Valid if loaded from memory */
 	midi_hdr_t hdr;
 	midi_trk_t trks[MAX_NUM_OF_TRKS]; /* If combined, the result is stored in trk[0] */
-	int combined; /* Indicates whether all tracks are combined into one */
 } midi_t;
 
 const char MTHD_MAGIC[] = {'M','T','h','d'};
