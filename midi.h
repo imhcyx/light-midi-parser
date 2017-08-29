@@ -33,6 +33,7 @@ typedef struct midi_hdr_s {
 } midi_hdr_t;
 
 typedef struct midi_evt_node_s {
+	struct midi_evt_node_s *prev;
 	struct midi_evt_node_s *next; /* NULL if no more events */
 	int deltatime;
 	midi_evt_t evt;

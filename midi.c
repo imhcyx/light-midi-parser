@@ -32,6 +32,7 @@ static int midi_parse_trk(midi_t *midi, int trkno);
 static void translate_abstime(midi_trk_t *trk);
 static void translate_deltatime(midi_trk_t *trk);
 static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2);
+static void rebuild_backlink_trk(midi_trk_t *trk);
 
 static int midi_eof(midi_t *midi) {
 	if (midi->stream) {
@@ -263,6 +264,7 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 			node = NULL;
 		}
 	}
+	rebuild_backlink_trk(&midi->trks[trkno]);
 	return 0;
 }
 
@@ -293,6 +295,7 @@ static void translate_deltatime(midi_trk_t *trk) {
 
 /* Combine trk2 into trk1 */
 /* Both tracks have to be in absolute time */
+/* Produces a one-way linked track */
 static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2) {
 	midi_evt_node_t *cur, *node1, *node2, *tmp;
 	node1 = trk1->first;
@@ -342,6 +345,17 @@ static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2) {
 			free((void*)tmp);
 		}
 		cur = cur->next;
+	}
+}
+
+/* Complete double links after one-way links are established */
+static void rebuild_backlink_trk(midi_trk_t *trk) {
+	midi_evt_node_t *node;
+	node = trk->first;
+	node->prev = NULL;
+	while (node) {
+		if (node->next) node->next->prev = node;
+		node = node->next;
 	}
 }
 
@@ -420,6 +434,7 @@ void midi_combine_track(midi_t *midi) {
 		combine_trk_abstime(&midi->trks[0], &midi->trks[i]);
 	}
 	translate_deltatime(&midi->trks[0]);
+	rebuild_backlink_trk(&midi->trks[0]);
 }
 
 void midi_close(midi_t *midi) {
