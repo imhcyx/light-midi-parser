@@ -209,17 +209,6 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 				}
 				node->paramsize = i;
 				break;
-			case 0xf1:	case 0xf4:	case 0xf5:
-			case 0xf6:	case 0xf7:	case 0xf8:
-			case 0xf9:	case 0xfa:	case 0xfb:
-			case 0xfc:	case 0xfd:	case 0xfe:
-				break;
-			case 0xf2:
-				midi_seek(midi, 2, SEEK_CUR);
-				break;
-			case 0xf3:
-				midi_seek(midi, 1, SEEK_CUR);
-				break;
 			case meta_evt:
 				c = midi_getc(midi);
 				if (c < 0) return -1;
@@ -244,10 +233,28 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 					node->param1 = msb24(buf);
 					break;
 				default:
+					/* we have to process these events */
+					/* because some of them have nonzero deltatime */
+					if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
+					node->evt = unknown;
 					if (midi_seek(midi, i, SEEK_CUR)) return -1;
 					break;
 				}
 				break;
+			case 0xf2:
+				midi_seek(midi, 1, SEEK_CUR);
+				/* fall thru */
+			case 0xf3:
+				midi_seek(midi, 1, SEEK_CUR);
+				/* fall thru */
+			case 0xf1:	case 0xf4:	case 0xf5:
+			case 0xf6:	case 0xf7:	case 0xf8:
+			case 0xf9:	case 0xfa:	case 0xfb:
+			case 0xfc:	case 0xfd:	case 0xfe:
+				/* we have to process these events */
+				/* because some of them have nonzero deltatime */
+				if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
+				node->evt = unknown;
 			default:
 				/* TODO: Unrecognized */
 				break;

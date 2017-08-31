@@ -22,6 +22,7 @@ int main(int argc, char* argv[]) {
 		midi_close(midi);
 		return 1;
 	}
+	//midi_combine_track(midi);
 	hdr = midi_get_header(midi);
 	printf("format: %d\n", hdr->format);
 	printf("ntrks: %d\n", hdr->ntrks);
@@ -65,6 +66,9 @@ int main(int argc, char* argv[]) {
 					printf("%d\ttempo   %d\n", node->deltatime, node->param1);
 					break;
 				}
+				break;
+			default:
+				printf("%d\tunknown\n", node->deltatime);
 				break;
 			}
 		}

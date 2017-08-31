@@ -4,6 +4,7 @@
 #include <string.h>
 
 typedef enum {
+	unknown = 0,
 	/* Channel Voice Messages */
 	/* low 8 bits are chan no */
 	note_off = 0x80,
