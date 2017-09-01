@@ -1,6 +1,11 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
 #include "midi.h"
 
-#define MAX_NUM_OF_TRKS 32
+#define MAX_NUM_OF_TRKS 48
 #define MAX_SYSEX_DATA_LEN 128
 
 typedef struct midi_s {
@@ -21,6 +26,7 @@ const char MTRK_MAGIC[] = {'M','T','r','k'};
 #define msb24(b) ((b)[0] & 0xff) << 16 | ((b)[1] & 0xff) << 8 | ((b)[2] & 0xff)
 #define msb16(b) ((b)[0] & 0xff) << 8 | ((b)[1] & 0xff)
 
+static void error_log(char *fmt, ...);
 static int midi_eof(midi_t *midi);
 static int midi_getc(midi_t *midi);
 static int midi_getnc(midi_t *midi, char* buf, int nbytes);
@@ -33,6 +39,15 @@ static void translate_abstime(midi_trk_t *trk);
 static void translate_deltatime(midi_trk_t *trk);
 static void combine_trk_abstime(midi_trk_t *trk1, midi_trk_t *trk2);
 static void rebuild_backlink_trk(midi_trk_t *trk);
+
+static void error_log(char *fmt, ...) {
+	va_list arg;
+	va_start(arg, fmt);
+	fprintf(stderr, "MIDI parser error: ");
+	vfprintf(stderr, fmt, arg);
+	fprintf(stderr, "\n");
+	va_end(arg);
+}
 
 static int midi_eof(midi_t *midi) {
 	if (midi->stream) {
@@ -141,103 +156,93 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 	midi_evt_t evt = 0;
 	midi_meta_evt_t meta;
 	midi_evt_node_t *node, *tail;
-	if (midi_getnc(midi, buf, 4) != 4) return -1;
+	if (midi_getnc(midi, buf, 4) != 4) goto _err_cleanup;
 	length = msb32(buf);
 	initpos = midi_tell(midi);
 	node = NULL;
 	while (loopflag && midi_tell(midi) - initpos < length) {
 		deltatime = midi_readvarlen(midi);
-		if (deltatime < 0) return -1;
+		if (deltatime < 0) goto _err_cleanup;
 		c = midi_getc(midi);
-		if (c < 0) return -1;
+		if (c < 0) goto _err_cleanup;
 		if (c & 0x80) {
 			evt = c;
 			if ((evt & 0xf0) != 0xf0) {
 				c = midi_getc(midi);
-				if (c < 0) return -1;
+				if (c < 0) goto _err_cleanup;
 			}
+		}
+		if (!malloc_t_zero(node, midi_evt_node_t)) {
+			error_log("No memory");
+			goto _err_cleanup;
 		}
 		switch (evt & 0xf0) {
 		case note_off:
 		case note_on:
 		case poly_key_press:
 		case ctrl_change:
-			if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 			node->evt = evt & 0xf0;
 			node->chan = evt & 0xf;
 			node->param1 = c;
 			c = midi_getc(midi);
-			if (c < 0) return -1;
+			if (c < 0) goto _err_cleanup;
 			node->param2 = c;
 			break;
 		case prog_change:
 		case chan_press:
-			if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 			node->evt = evt & 0xf0;
 			node->chan = evt & 0xf;
 			node->param1 = c;
 			break;
 		case pitch_change:
-			if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 			node->evt = evt & 0xf0;
 			node->chan = evt & 0xf;
 			node->param1 = c;
 			c = midi_getc(midi);
-			if (c < 0) return -1;
+			if (c < 0) goto _err_cleanup;
 			node->param1 |= c << 7;
 			break;
 		default:
 			switch (evt) {
 			case sysex:
-				if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 				node->evt = evt;
 				if ((node->parambuf = malloc(MAX_SYSEX_DATA_LEN)) == NULL) {
-					free((void*)node);
-					return -1;
+					error_log("No Memory");
+					goto _err_cleanup;
 				}
 				c = midi_getc(midi);
-				if (c < 0) return -1;
+				if (c < 0) goto _err_cleanup;
 				for (i = 0; i < MAX_SYSEX_DATA_LEN && c != 0xf7; i++) {
 					*(node->parambuf + i) = (char)c;
 					c = midi_getc(midi);
-					if (c < 0) return -1;
+					if (c < 0) goto _err_cleanup;
 				}
-				if (c != 0xf7) {
-					free((void*)node->parambuf);
-					free((void*)node);
-					return -1;
-				}
+				if (c != 0xf7) goto _err_cleanup;
 				node->paramsize = i;
 				break;
 			case meta_evt:
 				c = midi_getc(midi);
-				if (c < 0) return -1;
+				if (c < 0) goto _err_cleanup;
 				meta = c;
 				i = midi_readvarlen(midi); /* meta event length */
-				if (i < 0) return -1;
+				if (i < 0) goto _err_cleanup;
 				switch (meta) {
 				case eot:
-					if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 					node->evt = meta_evt;
 					node->meta = meta;
 					loopflag = 0;
 					break;
 				case set_tempo:
-					if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 					node->evt = meta_evt;
 					node->meta = meta;
-					if (midi_getnc(midi, buf, 3) != 3) {
-						free((void*)node);
-						return -1;
-					}
+					if (midi_getnc(midi, buf, 3) != 3) goto _err_cleanup;
 					node->param1 = msb24(buf);
 					break;
 				default:
 					/* we have to process these events */
 					/* because some of them have nonzero deltatime */
-					if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 					node->evt = unknown;
-					if (midi_seek(midi, i, SEEK_CUR)) return -1;
+					if (midi_seek(midi, i, SEEK_CUR)) goto _err_cleanup;
 					break;
 				}
 				break;
@@ -253,7 +258,6 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 			case 0xfc:	case 0xfd:	case 0xfe:
 				/* we have to process these events */
 				/* because some of them have nonzero deltatime */
-				if (!malloc_t_zero(node, midi_evt_node_t)) return -1;
 				node->evt = unknown;
 			default:
 				/* TODO: Unrecognized */
@@ -273,6 +277,12 @@ static int midi_parse_trk(midi_t *midi, int trkno) {
 	}
 	rebuild_backlink_trk(&midi->trks[trkno]);
 	return 0;
+_err_cleanup:
+	if (node) {
+		if (node->parambuf) free((void*)node->parambuf);
+		free((void*)node);
+	}
+	return -1;
 }
 
 /* Translate a track into absolute time */
@@ -412,12 +422,24 @@ int midi_parse(midi_t *midi) {
 			return -1;
 		}
 		if (!memcmp(MTHD_MAGIC, buf, 4)) {
-			if (midi_parse_hdr(midi)) return -1;
-			if (midi->hdr.ntrks > MAX_NUM_OF_TRKS) return -1;
+			if (midi_parse_hdr(midi)) {
+				error_log("Failed to parse MIDI header");
+				return -1;
+			}
+			if (midi->hdr.ntrks > MAX_NUM_OF_TRKS) {
+				error_log("Too many tracks: %d", midi->hdr.ntrks);
+				return -1;
+			}
 		}
 		else if (!memcmp(MTRK_MAGIC, buf, 4)) {
-			if (trkno >= midi->hdr.ntrks) return -1;
-			if (midi_parse_trk(midi, trkno++)) return -1;
+			if (trkno >= midi->hdr.ntrks) {
+				error_log("Bad ntrks in MIDI header");
+				return -1;
+			}
+			if (midi_parse_trk(midi, trkno++)) {
+				error_log("Failed to parse track");
+				return -1;
+			}
 		}
 		else {
 			/* TODO: skip */
@@ -448,7 +470,7 @@ void midi_close(midi_t *midi) {
 	int i;
 	midi_evt_node_t *node, *tmp;
 	if (!midi) return;
-	for (i = 0; i < midi->hdr.ntrks; i++) {
+	for (i = 0; i < MAX_NUM_OF_TRKS; i++) {
 		node = midi->trks[i].first;
 		while (node != NULL) {
 			if (node->parambuf) free((void*)node->parambuf);
