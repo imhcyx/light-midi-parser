@@ -17,4 +17,4 @@ A very simple MIDI file parser which only cares about information commonly used 
 |FF 2F     |META End of Track      |
 |FF 51     |META Set Tempo         |
 
-In 8x~Ex, x represents channel no. which can be 0~F.
+In 8x\~Ex, x represents channel no. which can be 0~F.
