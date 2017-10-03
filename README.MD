@@ -1,6 +1,6 @@
 # light-midi-parser
 
-<p>A very simple MIDI file parser which only cares about information commonly used in playing a MIDI file. This project may be buggy. Use at your own risk.</p>
+A very simple MIDI file parser which only cares about information commonly used in playing a MIDI file. This project may be buggy. Use at your own risk.
 
 ## Supported MIDI Events
 
@@ -17,4 +17,4 @@
 |FF 2F     |META End of Track      |
 |FF 51     |META Set Tempo         |
 
-<p>In 8x~Ex, x represents channel no. which can be 0~F.</p>
+In 8x~Ex, x represents channel no. which can be 0~F.
